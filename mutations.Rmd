@@ -1,0 +1,103 @@
+---
+title: "Mutations"
+output: html_document
+date: "2024-12-16"
+---
+
+
+## Load libraries
+```{r, results = FALSE, message = FALSE, warning = FALSE}
+
+library("TCGAbiolinks")
+library("SummarizedExperiment")
+```
+
+
+## Load Data
+
+```{r}
+
+assay.mutations <- as.matrix(readr::read_tsv("DataSets/brain_cancer_mutations.tsv"))
+```
+
+
+
+```{r}
+
+rownames(assay.mutations) <- assay.mutations[,"Patient_ID"]
+assay.mutations <- assay.mutations[,-1]
+assay.mutations <- assay.mutations[,-1]
+```
+
+
+```{r}
+dim(assay.mutations)
+```
+
+
+
+## Data Quality Check and Cleaning
+
+# Uniquely identifying 
+
+```{r}
+length(unique(rownames(assay.mutations))) == nrow(assay.mutations)
+```
+
+
+
+#  Handling Missing Values
+The matrix just contains missing values and 1's.
+```{r}
+
+assay.mutations <- ifelse(is.na(assay.mutations), 0, 1)
+```
+
+
+
+
+# Outliers
+
+```{r}
+
+target_assay <- assay.mutations
+```
+
+
+
+Remove Low-Count Mutations (retain mutations that are present in at least five samples)
+```{r}
+
+dim(target_assay)
+
+keep <- rowSums(t(target_assay)) >= 5
+target_assay <- target_assay[,keep]
+dim(target_assay)
+```
+
+```{r}
+
+assay.mutations <- target_assay
+```
+
+## EDA
+
+# Transformation
+No need.
+
+
+# Pre-feature selection
+No need.
+
+
+# Normalization 
+No need.
+
+
+## Save Final Matrix
+```{r}
+
+write.csv(assay.mutations, "DataSets/processed_assays/assay_mutations.csv", row.names = TRUE)
+```
+
+

@@ -1,0 +1,368 @@
+---
+title: "RNA"
+output: html_document
+date: "2024-11-26"
+---
+
+
+## Load libraries
+```{r, results = FALSE, message = FALSE, warning = FALSE}
+
+library("TCGAbiolinks")
+library("SummarizedExperiment")
+
+library("DESeq2")
+library("edgeR")
+```
+
+
+## Load useful functions
+
+```{r}
+
+ids_duplicated <- function(assay){
+  
+  prefixes <- substr(rownames(assay), 1, 12)
+  groups <- split(rownames(assay), prefixes)
+  duplicated_groups <- groups[sapply(groups, length) > 1]
+  return(duplicated_groups)
+}
+
+  
+del_repl_barcodes <- function(assay) {
+  
+  dupl_barcodes <- unlist(ids_duplicated(assay), use.names = FALSE)
+  filtered_assay <- assay[!rownames(assay) %in% dupl_barcodes, , drop = FALSE]
+  rownames(filtered_assay) <- substr(rownames(filtered_assay), 1, 12)
+  
+  return (filtered_assay)
+}
+
+get_assay_gene_type <- function(genes_types, assay, info) {
+  
+  # find the indices of the genes with the matching 'genes_types'
+  selected_genes <- which(info[,"gene_type"] %in% genes_types)
+  
+  # select the corresponding columns from the assay matrix
+  selected_assay <- assay[, selected_genes, drop = FALSE]
+  return(selected_assay)
+}
+
+```
+
+
+
+## Download Data
+There are (for 'data.category' = "Transcriptome Profiling"), the following 'data.type':
+  . Differential Gene Expression (only 44 files)
+  . Gene Expression Quantification (~24k): contains quantified expression levels of all genes in the sample (for broad analysis of gene expression).
+  . Isoform Expression Quantification (~ 17k)
+  . miRNA Expression Quantification (~ 17k): quantified expression levels of microRNAs, small non-coding RNAs that regulate gene expression.
+  . Raw Intensities (~1k files)
+  . Single Cell Analysis (only 88 files)
+  
+Setting 'data.type' to "Gene Expression Quantification". 
+```{r, results = 'hide', message = FALSE, warning = FALSE}
+
+query_rna <- GDCquery(
+  project = c("TCGA-GBM", "TCGA-LGG"),
+  data.category = "Transcriptome Profiling" ,
+  data.type = "Gene Expression Quantification" ,
+  workflow.type = "STAR - Counts", # the others 2 options very few files
+  access = "open",
+  platform = "Illumina", # only one available (for this 'data.type')
+  data.format = "tsv", # only one available (for this 'workflow.type')
+  experimental.strategy = "RNA-Seq" # only one available (for this 'workflow.type')
+)
+
+if (!dir.exists("DataSets/GDCdata/TCGA-GBM/Transcriptome_Profiling/Gene_Expression_Quantification") ||
+    !dir.exists("DataSets/GDCdata/TCGA-LGG/Transcriptome_Profiling/Gene_Expression_Quantification")) {
+  GDCdownload(query = query_rna)
+}
+
+data.rna <- GDCprepare(query_rna, summarizedExperiment = TRUE)
+rm(query_rna)
+```
+"Genome of reference: hg38" in the output of the query, so I guess this is harmonized.
+
+
+
+
+```{r}
+
+info.rna <- as.matrix(rowData(data.rna))
+assay.rna <- t(as.matrix(assay(data.rna)))
+
+rm(data.rna)
+```
+Type of Data -> raw counts.
+
+
+
+In "assay.rna", there are many types of RNA-seq, including "miRNA".
+```{r}
+
+unique(info.rna[, "gene_type"])
+```
+
+
+
+```{r}
+
+assay.rna.coding <- get_assay_gene_type("protein_coding", assay.rna, info.rna)
+assay.rna.mirna <- get_assay_gene_type("miRNA", assay.rna, info.rna)
+
+
+dim(assay.rna)
+dim(assay.rna.coding)
+dim(assay.rna.mirna)
+```
+
+## Save Original Assays
+
+```{r}
+write.csv(assay.rna.mirna, "original_assays/assay_rna_mirna.csv", row.names = TRUE)
+write.csv(assay.rna.coding, "original_assays/assay_rna_coding.csv", row.names = TRUE)
+```
+
+
+
+## Arrange the names (for later PCGSEA)
+
+```{r}
+
+colnames(assay.rna.coding) <- sub("\\.\\d+$", "", colnames(assay.rna.coding))
+colnames(assay.rna.mirna) <- sub("\\.\\d+$", "", colnames(assay.rna.mirna))
+```
+
+
+## Data Quality Check and Cleaning
+
+# Uniquely identifying 
+```{r}
+
+ids_duplicated(assay.rna.coding)
+ids_duplicated(assay.rna.mirna)
+```
+
+
+```{r}
+
+dim(assay.rna.coding)
+assay.rna.coding <- del_repl_barcodes(assay.rna.coding)
+dim(assay.rna.coding)
+
+dim(assay.rna.mirna)
+assay.rna.mirna <- del_repl_barcodes(assay.rna.mirna)
+dim(assay.rna.mirna)
+```
+
+
+
+
+#  Handling Missing Values
+
+```{r}
+
+sum(is.na(assay.rna.coding)) / prod(dim(assay.rna.coding))
+sum(is.na(assay.rna.mirna)) / prod(dim(assay.rna.mirna))
+```
+The assays do not have missing values. 
+
+
+
+```{r}
+sum(assay.rna.coding==0)/prod(dim(assay.rna.coding)) *100
+sum(assay.rna.mirna==0)/prod(dim(assay.rna.mirna))*100
+```
+
+# Outliers
+
+
+```{r}
+
+target_assays <- list(t(assay.rna.coding), t(assay.rna.mirna))
+```
+
+
+Remove Low-Count Genes (retain genes that have counts > 1 in at least five samples)
+```{r}
+
+lapply(target_assays, dim)
+for (assay_idx in 1:length(target_assays)){
+  keep <- rowSums(cpm(target_assays[[assay_idx]]) > 1) >= 5
+  target_assays[[assay_idx]] <- target_assays[[assay_idx]][keep,]
+}
+lapply(target_assays, dim)
+```
+
+
+
+## EDA
+
+# Transformation
+
+
+Normalizing according to the library size
+```{r}
+
+for (assay_idx in 1:length(target_assays)){
+  dge_assay <- DGEList(counts = target_assays[[assay_idx]])
+  target_assays[[assay_idx]] <- normLibSizes(dge_assay, method = "TMM")
+  
+}
+```
+
+
+Voom transformation to stabilize the variance and convert the counts into log2-CPM
+```{r}
+
+for (assay_idx in 1: length(target_assays)){
+  temp <- voom(target_assays[[assay_idx]], plot = F)
+  target_assays[[assay_idx]] <- as.matrix(temp$E)
+}
+```
+
+
+```{r}
+target_assays <- lapply(target_assays, t)
+```
+
+
+
+# Pre-feature selection
+
+```{r}
+
+sum(assay.rna.coding == 0) / prod(dim(assay.rna.coding))
+sum(assay.rna.mirna == 0)/ prod(dim(assay.rna.mirna))
+```
+
+What are the intervals of the variance for each assay?
+```{r}
+
+for (assay_idx in 1:length(target_assays)){
+  var_vec <- apply(target_assays[[assay_idx]], MARGIN = 2, function(x) var(x, na.rm = TRUE))
+  print(summary(var_vec))
+}
+
+```
+
+
+```{r}
+var_mrna <- apply(target_assays[[1]], 2, var)
+df_mrna <- data.frame(variance = var_mrna)
+
+var_mirna <- apply(target_assays[[2]], 2, var)
+df_mirna <- data.frame(variance = var_mirna)
+
+
+text_size <- 2
+plot1 <- ggplot(df_mrna, aes(y = variance)) +
+    geom_boxplot(fill = "#FF7F32", color = "black", outlier.color = "#00B3B3") +  
+  geom_hline(aes(yintercept = quantile(variance, 0.5)),  
+             color = "black", lwd = 0.8, linetype = "dashed") +  
+  labs(y = "Feature Variance", x = "") +  
+  theme(
+    axis.ticks.x = element_blank(),
+    axis.text.x = element_blank(),
+      axis.text.y = element_text(size=rel(text_size), hjust=1, color='black'),
+     
+      axis.title.y= element_text(size=rel(text_size), hjust=1, color='black'),
+      axis.title.x=element_text(size=rel(text_size), vjust=1, color='black'),
+      legend.text = element_text(size = rel(text_size), color = 'black'),
+       legend.title = element_text(size = rel(text_size), color = 'black'),
+     panel.grid.minor = element_blank(), 
+      panel.border = element_rect(color = "black", fill = NA, size = 0.8),
+      panel.background = element_blank(),
+    )
+
+plot2 <- ggplot(df_mirna, aes(y = variance)) +
+   geom_boxplot(fill = "#FF7F32", color = "black", outlier.color = "#00B3B3") +  
+  geom_hline(aes(yintercept = quantile(variance, 0.2)),  
+             color = "black", lwd = 0.8, linetype = "dashed") +  
+  labs(y = "Feature Variance", x = "") +  
+  theme(
+    axis.ticks.x = element_blank(),
+    axis.text.x = element_blank(), 
+      axis.text.y = element_text(size=rel(text_size), hjust=1, color='black'),
+      axis.title.y= element_text(size=rel(text_size), hjust=1, color='black'),
+      axis.title.x=element_text(size=rel(text_size), vjust=1, color='black'),
+      legend.text = element_text(size = rel(text_size), color = 'black'),
+       legend.title = element_text(size = rel(text_size), color = 'black'),
+     panel.grid.minor = element_blank(), 
+      panel.border = element_rect(color = "black", fill = NA, size = 0.8),
+      panel.background = element_blank(),
+    )
+
+
+plot1
+plot2
+ggsave(filename = "mrna_feature_var.pdf", plot = plot1, width = 9, height = 7, dpi = 300)
+ggsave(filename = "mirna_feature_var.pdf", plot = plot2, width = 9, height = 7, dpi = 300)
+```
+
+
+
+
+
+Keeping the 50% of the top most variable genes (for mRNA and lncRNA) and 80% of miRNA
+```{r}
+
+
+sorted_mrna <- order(var_mrna, decreasing = TRUE)
+sorted_mirna <- order(var_mirna, decreasing = TRUE)
+
+
+# keep the top 50% most variable genes for mRNA/lncRNA
+top_50_mrna <- sorted_mrna[1: floor(length(var_mrna) * 0.5)]
+target_assays[[1]] <- target_assays[[1]][,top_50_mrna ]
+
+
+# keep the top 80% most variable genes for miRNA
+top_80_mirna <- sorted_mirna[1: floor(length(var_mirna) * 0.8)]
+target_assays[[2]] <- target_assays[[2]][,top_80_mirna ]
+
+```
+
+
+
+
+
+
+# Normalization 
+```{r}
+
+target_assays <- lapply(target_assays, function(assay) scale(assay, center = TRUE, scale = TRUE))
+```
+
+```{r}
+
+assay.rna.coding <- target_assays[[1]]
+assay.rna.mirna <- target_assays[[2]]
+```
+
+
+
+## Arrange the info matrices
+
+```{r}
+rownames(info.rna) <- sub("\\.\\d+$", "", rownames(info.rna))
+
+info.rna.mirna <- info.rna[colnames(assay.rna.mirna), , drop = FALSE]
+info.rna.coding <- info.rna[colnames(assay.rna.coding), , drop = FALSE]
+```
+
+
+
+
+## Save Final Matrices
+```{r}
+
+write.csv(assay.rna.mirna, "DataSets/processed_assays/assay_rna_mirna.csv", row.names = TRUE)
+write.csv(assay.rna.coding, "DataSets/processed_assays/assay_rna_coding.csv", row.names = TRUE)
+
+write.csv(info.rna.mirna, "DataSets/processed_assays/info_rna_mirna.csv", row.names = TRUE)
+write.csv(info.rna.coding, "DataSets/processed_assays/info_rna_coding.csv", row.names = TRUE)
+```
+
