@@ -1,0 +1,1017 @@
+---
+title: "Prepare_2_Analysis"
+output: html_document
+date: "2025-03-16"
+---
+
+
+
+
+## Download Data (from TCGAbiolinks) and Prepare
+
+In this section, multiple omics are downloaded. All are matrices, where the rows are barcodes and the columns are features (named). 
+Then, the barcodes are replaced with a unique key indentifier.
+
+
+About glial cells:
+  . Categories:
+    From CNS (central nervous system): astrocytes, oligodendrocytes, microglia, ependyma and radial glial (stem cell).
+    From PNS (peripheral nervous system): schwann cells and satellite cells.
+  
+  . Functions:
+    Astrocytes forms the blood-brain barrier (controls which substances enters the brain), regulates neurotransmitters (after they deliver the message, these cells recycle them), clean things up (what's left when a neuron dies), regulating blood flow to the brain and regulates metabolism in the brain (stores sugar/glucose from the blood).
+    Oligodendrocytes helps information move faster along axons in the brain.
+    Microglia is the brain's immune system (the brain needs since the blood-brain barrier isolates the brain from the rest of the body; respond to an injury, causing inflammation as part of the healing process.).
+    Schwann cells works like oligodendrocytes, but in PNS.
+  
+
+Gliomas are a broad category of brain that arise from glial cells, which are the supportive cells of the nervous system (provide physical and chemical support to neurons and maintain their environment). They are usually categorized by:
+  . Type (type of glial cell the tumors originate from): astrocytoma (IDH-mutant), oligodendroglioma (IDH-mutant, 1p/19q- codeleted) and glioblastoma (IDH-wildtype).
+  . Grade (grade of aggressiveness): grade 1-4. Note: in https://www.cancer.gov/ccg/research/genome-sequencing/tcga/studied-cancers/lower-grade-glioma-study, they classify grade 2 and 3 as LGG (lower-grade glioma). 
+  
+According to WHO (classification of 2021 - https://pmc.ncbi.nlm.nih.gov/articles/PMC9427889/): astrocytoma (IDH-mutant) (grade 2, 3, and 4), oligodendroglioma (IDH-mutant, and 1p/19q-codeleted) (grade 2 and 3) and glioblastoma (IDH-wildtype, TERT promoter, chromosomes +7/-10, EGFR) (grade 4).
+
+
+
+
+
+About TCGAbiolinks:
+  . Useful links:
+    To the use of the package
+    https://www.bioconductor.org/packages/release/workflows/vignettes/TCGAWorkflow/inst/doc/TCGAWorkflow.html#Epigenetic_analysis
+    https://rpubs.com/tiagochst/TCGAworkshop
+    https://bioconductor.org/packages/release/bioc/vignettes/TCGAbiolinks/inst/doc/query.html#Harmonized_data_options
+    
+    
+    To the legend of barcodes
+    https://gdc.cancer.gov/resources-tcga-users/tcga-code-tables 
+    https://docs.gdc.cancer.gov/Encyclopedia/pages/TCGA_Barcode/ 
+    
+    More about the GDC (data and processing)
+    https://gdc.cancer.gov/about-data 
+    https://docs.gdc.cancer.gov/Data_Portal_V1/Users_Guide/Exploration/
+    
+    The portal (to filter our search)
+    https://portal.gdc.cancer.gov/analysis_page?app=Projects
+    https://portal.gdc.cancer.gov/analysis_page?app=Downloads 
+  
+    Check the status of GDC portal
+    https://api.gdc.cancer.gov/status 
+  
+  
+The code to import the datasets should be like this.
+#------------------------------------------------------#
+query <- GDCquery(
+  project = c("TCGA-GBM", "TCGA-LGG"),
+  data.category = ,
+  data.type = ,
+  workflow.type = ,
+  access = "open",
+  platform =  ,
+  data.format = ,
+  experimental.strategy = 
+)
+
+GDCdownload(query)
+
+data <- GDCprepare(query, summarizedExperiment = TRUE)
+#------------------------------------------------------#
+
+In the website of GDC data portal, I filtered for:
+  - Disease Type: "gliomas"
+  - Program: "TCGA"
+  - Acess: "open"
+All of the data available according to these requests, corresponds to only one Primary Site: "brain". 
+
+I set 'summarizedExperiment = TRUE' (it is not available for all of the omics), so I can have access to a few more information, like:
+  . rowData(summarizedExperiment) = info about the features (rows)
+  . colData(summarizedExperiment) = info about the patients/samples (columns), that is clinical data
+  . assay(summarizedExperiment) = data matrix
+
+
+
+
+## Data Quality Check and Cleaning
+
+. Transcriptomics: count data
+. Epigenomics: values between 0 and 1 (beta values)
+. Mutations: zeros and ones
+. Proteome: continuous values
+
+# Uniquely indentifying 
+<!-- In here, the barcodes are transformed in unique identifiers. -->
+
+<!-- In each omics, the "submitter_id" is not uniquely identified (we may have in each assay multiple barcodes that correspond to the same participant). The "barcode" is matched to "submitter_id" by selecting the first 12 characters. -->
+
+
+<!-- QUESTION -- what to do with these multiple barcodes? Eliminate? Are we going to eliminate many samples? Is this more reasonable that choose one randomly? Is it the deletion insignificant?  -->
+
+<!-- It does note seem that much (individually), but when looking to all of them intersected this can have a significant impact. -->
+
+<!-- Eliminating for now, and replace the barcodes (row names) for the respective submitter_id. -->
+
+The barcodes that corresponded to the same patient were eliminated.
+
+
+
+# Handling Missing Values
+
+<!-- We can filter samples/features by taking out the ones that: -->
+<!--   . have more than 50% of NAs. -->
+<!-- QUESTION -- is this a good threshold?  -->
+
+<!-- For proteomics layer would not. All of the rows have a proprotion of missing values greater than 0.6. But taking into account that the 1000 features from ~1400 have more than 0.9 of NAs... -->
+
+
+
+<!-- How handle missing values? -->
+<!-- If the methods can handle them, okay. But still, in the particular case of proteomics this is severe. -->
+<!-- So delete the samples/features that have A LOT of NA (since this not shows that is MCAR: missing completely at random and not MNAR: missing not at random). -->
+<!-- If the NAs seem MCAR (missing completely at random), it is better to apply an imputation method: -->
+<!--   . Amelia package in R???? -->
+<!--   . Imputation with some statistics description. -->
+<!--   . Other imputation methods like KNN or something else. -->
+
+
+<!-- What other ways to visually see the distribution of NAs in a big matrix, like the ones we are using here? -->
+
+
+
+<!-- QUESTION-- in the case of count data, zero counts are almost the same as NAs right? What to do? -->
+
+
+
+. Transcriptomics: it does not have missing values, since it is count data
+. Epigenomics: the features with more or equal than 90% of NAs were removed
+. Mutations: nothing
+. Proteome: the features with more or equal than 90% of NAs were removed
+
+# Outliers
+
+
+---> Here it goes:
+      . Transcriptomics: it was removed Low-Count Genes (retain genes that have counts > 1 in at least five samples)
+      . Epigenomics: it was used a function qcfilter (outlier was defined as values smaller than 3 times IQR from the lower quartile or greater than 3 times IQR from the upper quartile)
+      . Mutations: remove Low-Count Mutations (retain mutations that are present in at least five samples)
+      . Proteome: nothing
+
+
+## Exploratory Data Analysis
+
+
+# Transformation
+
+<!-- We are going to integrate multi-omics. They need to be quite alike (in scale). Most of the methods just work well with continuous/normal data. So maybe this should be the goal for now. -->
+
+<!-- Ways of visualizing the distribution of the data, especially with this size?  -->
+
+
+
+<!-- ---------------- -->
+<!-- The assay of DNA Methylation are values between 0 and 1 (proportions) - the beta value. -->
+
+<!-- What transformations can be applied to accomplish our goal? -->
+<!--   . Logit transformation (as in DL): log(b+e/(1-b+e)) with a small adjustment (e = 1-6, e.g.) due to values exactly equal to zero and one. -->
+<!--   . other ideas ..??? -->
+
+
+<!-- MYABE TRANSFORM TO M VALUES -->
+
+
+<!-- ---------------- -->
+<!-- The assay of RNA are raw counts.  -->
+
+<!-- It's applied: -->
+<!--   1) TMM normalization:  -->
+<!--     . adjusts for these differences (differences in sequencing depth across samples, e.g., one sample might have been sequenced deeper than another) by scaling counts to make them comparable across samples. -->
+<!--     . accounts for these biases (some samples might have higher expression of a few genes which can distort the counts.) by using a weighted trimmed mean of log-fold changes between samples. -->
+
+<!--   2) Voom normalization: handles variance modeling, it assumes that the input data has already been adjusted for sequencing depth and composition bias. -->
+<!--   OR LOG   -->
+
+
+<!-- ---------------- -->
+<!-- The assay of proteome is centered in zero and goes from -5 to 5, but the data is mostly around zero.  -->
+
+
+
+
+
+
+
+
+
+
+. Transcriptomics: normalization with library size + voom stabilization + convert the counts into log2-CPM
+. Epigenomics: beta values were transformed in M values
+. Mutations: nothing
+. Proteome: nothing
+      
+      
+      
+      
+
+# Pre-Feature Selection
+
+
+<!-- We can filter the features by: -->
+<!--   . Variance filtering: removes features that have low variance across samples; BUT ignores feature interactions and ignore important features that might still have meaningful roles in clustering or predicting the target -->
+<!--   . Covariance/Correlation filtering: removes highly correlated or redundant features (keeping one from the pair); BUT for e.g. two genes highly correlated may still represent different aspects of a biological process. -->
+<!--   . Biological relevance: from gene sets, pathways -->
+<!--   . Signal Intensity -->
+
+
+<!-- Are there any other methods or methods that are more complete for this? -->
+
+<!-- In the paper "A review of unsupervised feature selection methods", they present some methods that we could test, specially the ones they categorized in -->
+<!--   . Filter methods as they select the most relevant features through the data itself, i.e., features are evaluated based on intrinsic properties of the data, without using any clustering algorithm that could guide the search of relevant features. -->
+
+<!-- That category can be divided in: -->
+<!--   . Univariate Methods: use some criteria to evaluate each feature in order to get an ordered list (ranking) of features, where the final feature subset is selected according to this order.  -->
+<!--   . Multivariate Methods: evaluate the relevance of the features jointly rather than individually, handling redundant and irrelevant features: -->
+<!--     . Statistical/Information -->
+<!--     . Bio-inspired -->
+<!--     . Spectral/Sparse Learning -->
+
+
+
+
+<!-- I think is better to pick a maximum number of features to give to the model, like a threshold. The models will work with more irrelevancy, may overfit and will have a high computational cost. Maybe 5k-6k is a good trade-off? [They use this in the becnhamrking paper, maybe therE is a reason behind]. -->
+
+
+
+. Transcriptomics: it was kept the 50% of the top most variable genes (for mRNA and lncRNA) and 80% of miRNA
+. Epigenomics: it was selected the top 2% of the  most variable CpG sites
+. Mutations: nothing
+. Proteome: nothing
+
+
+
+# Normalization
+Scale each assay to zero mean and unit variance for all of the features (EXCEPT MUTATIONS)
+
+
+
+
+## Load data
+
+
+# Genomics 
+```{r}
+
+assay.mutations <- as.matrix(read.csv("DataSets/processed_assays/assay_mutations.csv", row.names = 1))
+```
+
+
+# Epigenomics
+```{r}
+
+assay.methy <- as.matrix(read.csv("DataSets/processed_assays/assay_methylation.csv", row.names = 1))
+
+info.methy <- as.matrix(read.csv("DataSets/processed_assays/info_methylation.csv", row.names = 1))
+```
+We ignore the patients information from the SummarizedExperiment as we obtain that information from the clinical data.
+
+
+# Transcriptomics
+```{r}
+
+assay.rna.mirna <- as.matrix(read.csv("DataSets/processed_assays/assay_rna_mirna.csv", row.names = 1))
+assay.rna.coding <- as.matrix(read.csv("DataSets/processed_assays/assay_rna_coding.csv", row.names = 1))
+
+info.rna.mirna <- as.matrix(read.csv("DataSets/processed_assays/info_rna_mirna.csv", row.names = 1))
+info.rna.coding <- as.matrix(read.csv("DataSets/processed_assays/info_rna_coding.csv", row.names = 1))
+```
+We ignore the patients information from the SummarizedExperiment as we obtain that information from the clinical data.
+
+# Survival data
+```{r}
+survival_complete <- as.data.frame(read.csv("DataSets/processed_assays/survival_complete.csv", row.names = 1))
+```
+
+
+
+# Clinical data 
+```{r}
+
+clinical <- as.data.frame(read.csv("DataSets/processed_assays/clinical.csv", row.names = 1))
+```
+
+
+```{r}
+
+all(rownames(assay.methy) %in% rownames(clinical))
+all(rownames(assay.rna.coding) %in% rownames(clinical))
+all(rownames(assay.rna.lnc) %in% rownames(clinical))
+all(rownames(assay.rna.mirna) %in% rownames(clinical))
+all(rownames(assay.prote) %in% rownames(clinical))
+all(rownames(assay.mutations) %in% rownames(clinical))
+```
+
+
+
+
+
+# Classification 206/2021 by WHO
+
+
+```{r}
+
+classification <- as.data.frame(read.csv("DataSets/SIMPLIFIED_CLASSIFICATION_TCGA_2016_2021.csv", row.names = 1))
+```
+
+Is this classification according to the classsification in TCGA?
+```{r}
+clinical$transformed_labels[classification$classification.2021 == "glioblastoma"]
+clinical$transformed_labels[classification$classification.2021 == "astrocytoma"] # many disagreements
+clinical$transformed_labels[classification$classification.2021 == "oligodendroglioma"] # many disagreements
+clinical$transformed_labels[classification$classification.2021  == "unclassified"] # most of them classified as "glioblastoma" 
+
+matching_rows <- intersect(rownames(clinical), rownames(classification))
+t <- table(TCGA = clinical[matching_rows, "transformed_labels"], WHO = classification [matching_rows, "classification.2021"])
+t
+write.table(t, "info_data/label_tcga_vs_who.tsv", sep = "\t", row.names =FALSE, quote = FALSE)
+rm(matching_rows, t)
+```
+
+
+
+
+Many differences!!!    
+The primary diagnoses (from Clinical Data) do not distinguish the LGG cancers.
+
+
+
+```{r}
+
+classification$classification.2021 <- replace(classification$classification.2021,
+                                                          classification$classification.2021 == "unclassified", NA)
+```
+
+
+
+
+# Clinical 
+
+Let's organize the important information in only one data frame: metadata = clinical + classification by WHO, ensuring that the all of the assays has the patients represented on it.
+If info not available, there is "NA".
+
+```{r}
+
+missing_rows <- setdiff(rownames(clinical), rownames(classification)) # 23
+new <- as.data.frame(matrix(data = NA, nrow = length(missing_rows), ncol = 1, dimnames = list(missing_rows, "classification.2021")))
+classification2 <- rbind(classification[,"classification.2021", drop = FALSE], new)
+
+
+
+metadata <- merge(clinical, classification2, by="row.names")
+rownames(metadata) <- metadata$Row.names
+metadata$Row.names <- NULL
+rm(missing_rows, new, classification2)
+```
+
+
+
+```{r}
+
+# add a column "classification.2021.type" LGG or GBM label
+metadata$classification.2021.type <- ifelse(metadata$classification.2021 == "glioblastoma", "GBM",
+  ifelse(metadata$classification.2021  == "astrocytoma", "LGG",
+  ifelse(metadata$classification.2021  == "oligodendroglioma", "LGG",
+      NA))) # Default value for other classifications
+
+
+
+metadata$classification.2021 <- ifelse(metadata$classification.2021 == "glioblastoma", "GBM", 
+  ifelse(metadata$classification.2021  == "astrocytoma", "ASTRO",
+  ifelse(metadata$classification.2021  == "oligodendroglioma", "OLIGO",
+      NA)))
+```
+
+
+
+
+
+
+```{r}
+
+names(metadata)[names(metadata) == "classification.2021"] <- "Subtype"
+names(metadata)[names(metadata) == "classification.2021.type"] <- "Type"
+names(metadata)[names(metadata) == "age_at_index"] <- "Age"
+names(metadata)[names(metadata) == "vital_status"] <- "Vital_Status"
+names(metadata)[names(metadata) == "gender"] <- "Sex"
+```
+
+```{r}
+metadata$Gender <- ifelse(metadata$Sex == "female", "Female",
+  ifelse(metadata$Sex  == "male", "Male", NA))
+```
+
+
+
+## Datasets to be integrated
+
+The omics available are:
+  . Epigenomics: DNA methylation 
+  . Transciptomics: RNA-seq (in particular: mRNA, miRNA)
+  . Proteomics: Protein
+  . Mutations
+  
+Also:
+  . Clinical data
+  . Survival data (obtained from Clinical data)
+  . Classification by WHO
+  
+For most papers, the omics more used together are DNA methylation + mRNA expression + miRNA expression.
+It depends on the task. If we want to compare with phenotype, is recommended to use upper layers, like proteome. 
+
+In the paper "A guide to multi-omics data collection and integration for translational medicine", for the specific task of subtype identification is used: transciptomics + epigenomics (mainly). Overall, in cancer, the most common omics used for all objectives were the triad of transcriptomics, epigenomics and genomics data.
+
+
+```{r}
+omics.list <- list(Mutations = assay.mutations, Methylation = assay.methy, mRNA = assay.rna.coding, miRNA = assay.rna.mirna)
+```
+
+
+
+
+```{r}
+matching_rows <- Reduce(intersect, lapply(omics.list, rownames))
+omics.list <- lapply(omics.list, function(x) x[matching_rows, , drop = FALSE])
+
+metadata <- metadata[rownames(omics.list$Mutations), ] 
+lapply(omics.list, dim)
+
+
+rm(matching_rows)
+```
+
+
+## Analyse the reduced assays 
+
+```{r}
+text_size <- 2
+```
+
+
+
+Age
+```{r}
+
+
+length(which(metadata$Age < 18))
+
+summary(as.numeric(metadata$Age))
+
+
+p <- metadata %>%
+  ggplot(aes(x = Age)) +
+  geom_histogram(bins = 30, fill = "#00B3B3", color = "black", alpha = 0.7) +
+  labs(
+    title = "",
+    x = "Age",
+    y = "Counts"
+  ) +
+  theme(
+      axis.text.y = element_text(size=rel(text_size), hjust=1, color='black'),
+      axis.text.x = element_text(size=rel(text_size), vjust=0.5, color='black'),
+      axis.title.y= element_text(size=rel(text_size), hjust=1, color='black'),
+      axis.title.x=element_text(size=rel(text_size), vjust=1, color='black'),
+      legend.text = element_text(size = rel(text_size), color = 'black'),
+       legend.title = element_text(size = rel(text_size), color = 'black'),
+     panel.grid.minor = element_blank(), 
+      panel.border = element_rect(color = "black", fill = NA, size = 0.8),
+      panel.background = element_blank(),
+    ) +
+  xlim(0, NA) + 
+  scale_x_continuous(breaks = seq(-10,  max(metadata$Age, na.rm = T), by = 10))
+
+ ggsave(filename = "info_data/age_distribution.pdf", plot = p, width = 9, height = 7, dpi = 300)
+
+print(p)
+rm(p)
+```
+
+
+```{r}
+metadata_clean <- metadata %>%
+  filter(!is.na(Age), !is.na(Type))
+
+# Plot
+p <- ggplot(metadata_clean, aes(x = Age)) +
+  geom_density(aes(color = Type), size = 1) +
+  geom_density(data = metadata_clean, aes(x = Age), 
+               color = "black", size = 1.2, inherit.aes = FALSE, linetype = "dashed") +
+  labs(title = "",
+    x = "Age",
+    y = "Density",
+    color = "Glioma Type"
+  ) +
+  theme(
+    axis.text.y = element_text(size = rel(text_size), hjust = 1, color = 'black'),
+    axis.text.x = element_text(size = rel(text_size), vjust = 0.5, color = 'black'),
+    axis.title.y = element_text(size = rel(text_size), hjust = 1, color = 'black'),
+    axis.title.x = element_text(size = rel(text_size), vjust = 1, color = 'black'),
+    legend.text = element_text(size = rel(text_size), color = 'black'),
+    legend.title = element_text(size = rel(text_size), color = 'black'),
+    panel.grid.minor = element_blank(), 
+    panel.border = element_rect(color = "black", fill = NA, size = 0.8),
+    panel.background = element_blank()
+  )
+ggsave(filename = "info_data/age_distribution_density.pdf", plot = p, width = 9, height = 7, dpi = 300)
+
+```
+
+```{r}
+plot(density(metadata$Age, na.rm = T), main = "Density plot of Age")
+```
+
+
+```{r}
+minor_idxs <- which(metadata$Age < 18)
+
+metadata <- metadata[-minor_idxs, ]
+omics.list$Mutations <- omics.list$Mutations[-minor_idxs, ]
+
+matching_rows <- Reduce(intersect, lapply(omics.list, rownames))
+omics.list <- lapply(omics.list, function(x) x[matching_rows, , drop = FALSE])
+
+lapply(omics.list, dim)
+rm(matching_rows, minor_idxs)
+```
+
+```{r}
+survival <- survival_complete[rownames(omics.list$Mutations), ]
+```
+
+
+
+## Analyse the assays according to the type of Disease (assuming the classification of 2021)
+
+```{r}
+
+subset_disease <- function(assay, metadata, type = FALSE, string_disease = NULL){
+  if (type == FALSE){
+    if (is.null(string_disease)){
+      matching_row_names <- rownames(metadata)[is.na(metadata$Subtype)]
+    } else{
+      matching_row_names <- rownames(metadata)[metadata$Subtype == string_disease]
+    }
+  }
+  if (type == TRUE){
+    if (is.null(string_disease)){
+       matching_row_names <- rownames(metadata)[is.na(metadata$Type)]
+    } else {
+      matching_row_names <- rownames(metadata)[metadata$Type == string_disease]
+    }
+  }
+  filtered_assay <- assay[rownames(assay) %in% matching_row_names, , drop = FALSE]
+  return (filtered_assay)
+}
+```
+
+
+
+```{r}
+
+number_features <- lapply(omics.list, ncol)
+
+number_patients <- lapply(omics.list, nrow)
+
+
+astrocytoma_patients <- lapply(omics.list, function(omic) nrow(subset_disease(omic, metadata, type = FALSE, "ASTRO"))) 
+oligodendroglioma_patients <- lapply(omics.list, function(omic) nrow(subset_disease(omic, metadata, type = F,"OLIGO"))) 
+gliobastoma_patients <- lapply(omics.list, function(omic) nrow(subset_disease(omic, metadata, type = F,"GBM"))) 
+na_patietns <- lapply(omics.list, function(omic) nrow(subset_disease(omic, metadata, type = F, string_disease = NULL))) 
+
+lgg_patients <- lapply(omics.list, function(omic) nrow(subset_disease(omic, metadata, type = T, string_disease = "LGG"))) 
+gbm_patients <- lapply(omics.list, function(omic) nrow(subset_disease(omic, metadata, type = T, string_disease = "GBM"))) 
+naa_patients <- lapply(omics.list, function(omic) nrow(subset_disease(omic, metadata, type = T, string_disease = NULL))) 
+```
+
+
+
+```{r}
+
+t <- data.frame(Features = unlist(number_features), Patients = unlist(number_patients ))
+t
+write.csv(t, "info_data/n_and_p.csv", sep = "\t", row.names =TRUE, quote = FALSE)
+t <- data.frame(ASTRO = unlist(astrocytoma_patients), OLIGO  = unlist(oligodendroglioma_patients), GLIO = unlist(gliobastoma_patients), UNCLASS = unlist(na_patietns))
+t
+write.csv(t, "info_data/astro_vs_oligo_vs_gbm.csv", sep = "\t", row.names =TRUE, quote = FALSE)
+
+t <- data.frame(GBM = unlist(gbm_patients), LGG = unlist(lgg_patients), UNCLASS = unlist(naa_patients))
+t
+write.csv(t, "info_data/gbm_vs_lgg.csv", sep = "\t", row.names =TRUE, quote = FALSE)
+
+rm(number_features, astrocytoma_patients, oligodendroglioma_patients, gliobastoma_patients,na_patietns,lgg_patients, gbm_patients, naa_patients, number_patients, t)
+```
+
+
+
+
+
+## Save everything
+```{r}
+write.csv(metadata, "DataSets/2_analysis/clinical.csv", row.names = TRUE)
+write.csv(survival, "DataSets/2_analysis/survival_data.csv", row.names = TRUE)
+
+write.csv(omics.list$Mutations, "DataSets/2_analysis/mutations.csv", row.names = TRUE)
+write.csv(omics.list$Methylation, "DataSets/2_analysis/dna.csv", row.names = TRUE)
+write.csv(omics.list$mRNA, "DataSets/2_analysis/mrna.csv", row.names = TRUE)
+write.csv(omics.list$miRNA, "DataSets/2_analysis/mirna.csv", row.names = TRUE)
+```
+
+
+
+
+## Load
+
+```{r}
+
+metadata <- read.csv("DataSets/2_analysis/clinical.csv", row.names = 1)
+
+survival <- read.csv("DataSets/2_analysis/survival_data.csv", row.names = 1)
+
+mutations <- read.csv("DataSets/2_analysis/mutations.csv", row.names = 1)
+methylation <- read.csv("DataSets/2_analysis/dna.csv", row.names = 1)
+mrna <- read.csv("DataSets/2_analysis/mrna.csv", row.names = 1)
+mirna <- read.csv("DataSets/2_analysis/mirna.csv", row.names = 1)
+
+```
+
+
+## Data Description 
+```{r}
+library("ggplot2")
+library("gridExtra")
+library("reshape2")
+```
+
+
+# About Samples
+```{r}
+dim(metadata)
+```
+
+
+
+```{r}
+text_size <- 2
+
+plot1 <- ggplot(metadata, aes(x = Subtype, fill = Vital_Status)) +
+  geom_bar() +
+  labs(title = "", 
+       x = "Glioma Subtype", y = "Counts", fill = "Vital Status") +
+  scale_fill_manual(values =  c("#FF7F32", "#00B3B3", "#F1C27D"))+
+    scale_y_continuous(breaks = seq(0, max(table(metadata$Subtype)), by = 25)) + 
+    theme(
+      axis.text.y = element_text(size=rel(text_size), hjust=1, color='black'),
+      axis.text.x = element_text(size=rel(text_size), vjust=0.5, color='black'),
+      axis.title.y= element_text(size=rel(text_size), hjust=1, color='black'),
+      axis.title.x=element_text(size=rel(text_size), vjust=1, color='black'),
+      legend.text = element_text(size = rel(text_size), color = 'black'),
+       legend.title = element_text(size = rel(text_size), color = 'black'),
+     panel.grid.minor = element_blank(), 
+      panel.border = element_rect(color = "black", fill = NA, size = 0.8),
+      panel.background = element_blank(),
+    )
+
+plot2 <- ggplot(metadata, aes(x = Subtype, fill = Gender)) +
+  geom_bar() +
+  labs(title = "", 
+       x = "Glioma Subtype", y = "Counts", fill = "Sex") +
+    scale_y_continuous(breaks = seq(0, max(table(metadata$Subtype)), by = 25)) + 
+  scale_fill_manual(values = c("#FF7F32", "#00B3B3", "#F1C27D"))+
+    theme(
+      axis.text.y = element_text(size=rel(text_size), hjust=1, color='black'),
+      axis.text.x = element_text(size=rel(text_size), vjust=0.5, color='black'),
+      axis.title.y=element_text(size=rel(text_size), hjust=1, color='black'),
+      axis.title.x=element_text(size=rel(text_size), vjust=1, color='black'),
+      legend.text = element_text(size = rel(text_size), color = 'black'),
+       legend.title = element_text(size = rel(text_size), color = 'black'),
+       panel.grid.minor = element_blank(), 
+      panel.border = element_rect(color = "black", fill = NA, size = 0.8),
+      panel.background = element_blank(),
+    )
+
+plot3 <- ggplot(metadata, aes(x = Subtype, y = Age)) +
+  geom_boxplot(fill = "#00B3B3", color = "black") +
+  geom_jitter(width = 0.1, color = "black", size = 1.5) +
+  labs(title = "", 
+       x = "Glioma Subtype", y = "Age") +
+  expand_limits(y = 0) +
+    theme(
+      axis.text.y = element_text(size=rel(text_size), hjust=1, color='black'),
+      axis.text.x = element_text(size=rel(text_size), vjust=0.5, color='black'),
+      axis.title.y=element_text(size=rel(text_size), hjust=1, color='black'),
+      axis.title.x=element_text(size=rel(text_size), vjust=1, color='black'),
+      legend.text = element_text(size = rel(text_size), color = 'black'),
+      legend.title = element_text(size = rel(text_size), color = 'black'),
+      panel.grid.minor = element_blank(), 
+      panel.border = element_rect(color = "black", fill = NA, size = 0.8),
+      panel.background = element_blank(),
+    )
+
+
+plot1
+plot2
+plot3
+
+```
+```{r}
+ggsave(filename = "info_data/dist_folow_time.pdf", plot = p, width = 9, height = 7, dpi = 300)
+```
+
+
+```{r}
+table(metadata$Subtype)
+table(metadata$Gender)
+table(metadata$Vital_Status)
+
+```
+
+Distribution of Follow-up Times by Event Status, 
+```{r}
+survival$event_status <- ifelse(survival$Status == 1, "Dead", "Censored")
+
+p <- ggplot(survival, aes(x = Time, fill = event_status)) +
+  geom_histogram(position = "identity", alpha = 0.6, bins = 50) +
+  scale_fill_manual(values = c("Dead" = "#FF7F32", "Censored" = "#00B3B3")) +
+  labs(x = "Follow-up Time (days)", y = "Number of Patients", fill = "Status",
+       title = "") +
+  theme(
+      axis.text.y = element_text(size=rel(text_size), hjust=1, color='black'),
+      axis.text.x = element_text(size=rel(text_size), vjust=0.5, color='black'),
+      axis.title.y= element_text(size=rel(text_size), hjust=1, color='black'),
+      axis.title.x=element_text(size=rel(text_size), vjust=1, color='black'),
+      legend.text = element_text(size = rel(2), color = 'black'),
+      legend.title = element_text(size = rel(2), color = 'black'),
+      panel.grid.minor = element_blank(), 
+      panel.border = element_rect(color = "black", fill = NA, size = 0.8),
+      panel.background = element_blank(),
+    ) 
+  
+ggsave(filename = "info_data/dist_folow_time.pdf", plot = p, width = 9, height = 7, dpi = 300)
+```
+
+```{r}
+library("survival")
+library("survminer")
+
+surv_object <- Surv(time = survival$Time, event = survival$Status)
+
+fit_all <- survfit(surv_object ~ 1)
+
+
+p <- ggsurvplot(fit_all,
+           data = survival, 
+           conf.int = TRUE,           
+           risk.table = F, 
+           surv.median.line = "hv",      
+           title = "",
+           xlab = "Time (days)", 
+           ylab = "Survival probability",
+           palette = "black",
+           legend = "none")
+
+
+p <- p$plot + theme(
+      axis.text.y = element_text(size=rel(text_size), hjust=1, color='black'),
+      axis.text.x = element_text(size=rel(text_size), vjust=0.5, color='black'),
+      axis.title.y=element_text(size=rel(text_size), hjust=1, color='black'),
+      axis.title.x=element_text(size=rel(text_size), vjust=1, color='black'),
+      legend.text = element_text(size = rel(text_size), color = 'black'),
+      legend.title = element_text(size = rel(text_size), color = 'black'),
+      panel.grid.minor = element_blank(), 
+      panel.border = element_rect(color = "black", fill = NA, size = 0.8),
+      panel.background = element_blank(),
+    )
+
+p
+
+ggsave(filename = "info_data/kaplan_meier_all.pdf", plot = p, width = 9, height = 7, dpi = 300)
+```
+
+```{r}
+surv_object <- Surv(time = survival$Time, event = survival$Status)
+
+survival_group <- survival
+survival_group$Subtype <- metadata$Subtype
+
+
+fit_by_group <- survfit(surv_object ~ Subtype, data = survival_group)
+
+pw <- pairwise_survdiff(Surv(Time, Status) ~ Subtype, data = survival_group)
+pw_pval <- pw$p.value
+
+pval_labels <- apply(
+  pw_pval, 1:2,
+  function(x) ifelse(is.na(x), "", ifelse(x < 0.001, "p < 0.001", paste0("p = ", signif(x, 3))))
+)
+pval_labels <- as.data.frame(pval_labels)
+
+p <- ggsurvplot(fit_by_group,
+           data = survival_group,                     
+           conf.int = TRUE,
+           risk.table = F,
+           pval = F,
+           surv.median.line = "hv",
+           title = "",
+           xlab = "Time (days)",
+           ylab = "Survival Probability",
+           palette = "hue",
+            legend = "right",
+           legend.labs = c("ASTRO", "GBM", "OLIGO"),
+           legend.title = "Glioma Subtype")
+
+comparisons <- c("ASTRO vs GBM", "ASTRO vs OLIGO", "GBM vs OLIGO")
+text_labels <- c(
+  paste("GBM vs ASTRO:", pval_labels["GBM", "ASTRO"]),
+  paste("ASTRO vs OLIGO:", pval_labels["OLIGO", "ASTRO"]),
+  paste("GBM vs OLIGO:", pval_labels["OLIGO", "GBM"])
+)
+
+
+p <- p$plot + 
+    annotate("text", 
+          x = 2000, y = c(0.95, 0.89, 0.83), 
+           label = as.vector(text_labels),
+           hjust = 0,
+           size = 6,
+           color = "black") +
+  theme(
+      axis.text.y = element_text(size=rel(text_size), hjust=1, color='black'),
+      axis.text.x = element_text(size=rel(text_size), vjust=0.5, color='black'),
+      axis.title.y=element_text(size=rel(text_size), hjust=1, color='black'),
+      axis.title.x=element_text(size=rel(text_size), vjust=1, color='black'),
+      legend.text = element_text(size = rel(text_size), color = 'black'),
+      legend.title = element_text(size = rel(text_size), color = 'black'),
+      panel.grid.minor = element_blank(), 
+      panel.border = element_rect(color = "black", fill = NA, size = 0.8),
+      panel.background = element_blank(),
+    ) 
+
+p
+
+ggsave(filename = "info_data/kaplan_meier_subtype.pdf", plot = p, width = 9, height = 7, dpi = 300)
+```
+
+# About Features
+```{r}
+
+mrna_df <- melt(as.matrix(mrna))
+methylation_df <-  melt(as.matrix(methylation))
+mutations_df <-  melt(as.matrix(mutations))
+mirna_df <-  melt(as.matrix(mirna))
+
+plot1 <- ggplot(mrna_df, aes(x=value)) + 
+  geom_histogram(binwidth = 0.2, fill = "#00B3B3", color = "black") +
+  labs(title = "", x = "Value", y = "Counts") +
+  theme(
+    axis.text.y = element_text(size = rel(1.5), hjust = 1, color = 'black'),
+    axis.text.x = element_text(size = rel(1.5), vjust = 0.5, color = 'black'),
+    axis.title.y = element_text(size = rel(1.5), hjust = 1, color = 'black'),
+    axis.title.x = element_text(size = rel(1.5), vjust = 1, color = 'black'),
+    legend.text = element_text(size = rel(1.5), color = 'black'),
+    legend.title = element_text(size = rel(1.5), color = 'black'),
+    panel.grid.minor = element_blank(), 
+    panel.border = element_rect(color = "black", fill = NA, size = 0.8),
+    panel.background = element_blank()
+  )
+
+plot2 <- ggplot(methylation_df, aes(x=value)) + 
+  geom_histogram(binwidth = 0.2, fill = "#00B3B3", color = "black") +
+  labs(title = "", x = "Value", y = "Counts") +
+  theme(
+    axis.text.y = element_text(size = rel(1.5), hjust = 1, color = 'black'),
+    axis.text.x = element_text(size = rel(1.5), vjust = 0.5, color = 'black'),
+    axis.title.y = element_text(size = rel(1.5), hjust = 1, color = 'black'),
+    axis.title.x = element_text(size = rel(1.5), vjust = 1, color = 'black'),
+    legend.text = element_text(size = rel(1.5), color = 'black'),
+    legend.title = element_text(size = rel(1.5), color = 'black'),
+    panel.grid.minor = element_blank(), 
+    panel.border = element_rect(color = "black", fill = NA, size = 0.8),
+    panel.background = element_blank()
+  )
+
+
+plot3 <- ggplot(mutations_df, aes(x=value)) + 
+  geom_histogram(binwidth = 0.2, fill = "#00B3B3", color = "black") +
+  labs(title = "", x = "Value", y = "Counts") +
+  theme(
+    axis.text.y = element_text(size = rel(1.5), hjust = 1, color = 'black'),
+    axis.text.x = element_text(size = rel(1.5), vjust = 0.5, color = 'black'),
+    axis.title.y = element_text(size = rel(1.5), hjust = 1, color = 'black'),
+    axis.title.x = element_text(size = rel(1.5), vjust = 1, color = 'black'),
+    legend.text = element_text(size = rel(1.5), color = 'black'),
+    legend.title = element_text(size = rel(1.5), color = 'black'),
+    panel.grid.minor = element_blank(), 
+    panel.border = element_rect(color = "black", fill = NA, size = 0.8),
+    panel.background = element_blank()
+  )
+
+
+plot4 <- ggplot(mirna_df, aes(x=value)) + 
+  geom_histogram(binwidth = 0.2, fill = "#00B3B3", color = "black") +
+  labs(title = "", x = "Value", y = "Counts") +
+  theme(
+    axis.text.y = element_text(size = rel(1.5), hjust = 1, color = 'black'),
+    axis.text.x = element_text(size = rel(1.5), vjust = 0.5, color = 'black'),
+    axis.title.y = element_text(size = rel(1.5), hjust = 1, color = 'black'),
+    axis.title.x = element_text(size = rel(1.5), vjust = 1, color = 'black'),
+    legend.text = element_text(size = rel(1.5), color = 'black'),
+    legend.title = element_text(size = rel(1.5), color = 'black'),
+    panel.grid.minor = element_blank(), 
+    panel.border = element_rect(color = "black", fill = NA, size = 0.8),
+    panel.background = element_blank()
+  )
+
+
+plot3
+plot2
+plot1
+plot4
+```
+
+
+
+
+
+```{r}
+mrna_df$Assay <- "mRNA"
+mirna_df$Assay <- "miRNA"
+methylation_df$Assay <- "Methylation"
+
+
+combined_df <- bind_rows(mrna_df, mirna_df, methylation_df)
+combined_df$Assay <- factor(combined_df$Assay, levels = c( "Methylation", "mRNA", "miRNA"))  
+
+```
+
+```{r}
+plot_combined <- ggplot(combined_df, aes(x = Assay, y = value)) +
+   geom_boxplot(fill = "#00B3B3", color = "black") +
+  labs(title = "", 
+       x = "Omics", y = "Values") +
+  scale_y_continuous(breaks = seq(-10, max(combined_df$value, na.rm = T), by = 5)) +
+  theme(
+    axis.text.y = element_text(size = rel(text_size), hjust = 1, color = 'black'),
+    axis.text.x = element_text(size = rel(text_size), vjust = 0.5, color = 'black'),
+    axis.title.y = element_text(size = rel(text_size), hjust = 1, color = 'black'),
+    axis.title.x = element_text(size = rel(text_size), vjust = 1, color = 'black'),
+    legend.text = element_text(size = rel(text_size), color = 'black'),
+    legend.title = element_text(size = rel(text_size), color = 'black'),
+    panel.grid.minor = element_blank(),
+    panel.border = element_rect(color = "black", fill = NA, size = 0.8),
+    panel.background = element_blank()
+  )
+
+
+print(plot_combined)
+```
+
+
+
+```{r}
+library(ggplot2)
+library(reshape2)
+
+group <- factor(c(
+  rep("Methylation", length(as.vector(as.matrix(methylation)))),
+  rep("mRNA",        length(as.vector(as.matrix(mrna)))),
+  rep("miRNA",       length(as.vector(as.matrix(mirna))))
+), 
+levels = c("Methylation", "mRNA", "miRNA" ))
+
+df <- data.frame(
+  value = c(as.vector(as.matrix(methylation)), as.vector(as.matrix(mrna)), as.vector(as.matrix(mirna)))
+)
+
+df$group <- group
+text_size <- 2
+p <- ggplot(df, aes(x = group, y = value, fill = group)) +
+  geom_violin(trim = FALSE, fill =  "#00B3B3") +
+  labs(title = "", x = "Omics", y = "Values") +
+  theme(
+      axis.text.y = element_text(size = rel(text_size), hjust = 1, color = 'black'),
+      axis.text.x = element_text(size = rel(text_size), vjust = 0.5, color = 'black'),
+      axis.title.y = element_text(size = rel(text_size), hjust = 1, color = 'black'),
+      axis.title.x = element_text(size = rel(text_size), vjust = 1, color = 'black'),
+      legend.text =  element_blank(), 
+      legend.title =  element_blank(),
+      legend.position = "none",
+      panel.grid.minor = element_blank(), 
+      panel.border = element_rect(color = "black", fill = NA, size = 0.8),
+      panel.background = element_blank()
+    )
+
+ggsave(filename = "dist_omics.pdf", plot = p, width = 8, height = 6, dpi = 300)
+```
+
+
+
+```{r}
+p
+```
+

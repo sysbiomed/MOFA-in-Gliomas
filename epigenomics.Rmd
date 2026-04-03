@@ -1,0 +1,347 @@
+---
+title: "Epigenomics"
+output: html_document
+date: "2024-11-26"
+---
+
+## Load libraries
+```{r, results = FALSE, message = FALSE, warning = FALSE}
+
+library("TCGAbiolinks")
+library("SummarizedExperiment")
+
+library("ENmix")
+```
+
+## Load useful functions
+```{r}
+ids_duplicated <- function(assay){
+  
+  prefixes <- substr(rownames(assay), 1, 12)
+  groups <- split(rownames(assay), prefixes)
+  duplicated_groups <- groups[sapply(groups, length) > 1]
+  return(duplicated_groups)
+}
+
+  
+del_repl_barcodes <- function(assay) {
+  
+  dupl_barcodes <- unlist(ids_duplicated(assay), use.names = FALSE)
+  filtered_assay <- assay[!rownames(assay) %in% dupl_barcodes, , drop = FALSE]
+  rownames(filtered_assay) <- substr(rownames(filtered_assay), 1, 12)
+  
+  return (filtered_assay)
+}
+```
+
+
+
+
+## Download data
+DNA Methylation is a chemical modification where a methyl group (CH3) is added to the cytosine base in CpG sites. Can regulate gene expression, often silencing genes when promoter regions are methylated. 
+CpG site is a region where a cytosine nucleotide is followed by a guanine nucleotide in the DNA sequence.
+Hypermethylation of CpG sites on promoter regions generally reduces gene expression, whereas hypomethylation elevates gene expression.
+
+There are two 'data.type' for DNA methylation:
+  . "Masked Intensitites": refer to the raw or normalized signal intensities of methylated (M) and unmethylated (U) probes. Besides 'M', 'U' there is 'Masked Status' that can be set to "Masked" when there are low signal or "Passed".
+  . "Methylation Beta Value": represented as a beta value, which quantifies the fraction of DNA molecules methylated at a particular CpG site which ranges from 0 being unmethylated (active gene transcription) and 1 fully methylated (gene silencing). It can be calculated from "Masked Intensitites" by the formula M/(M+U+e), for the unmasked sites, where 'e' is a small constant to prevent division by zero.
+
+It was used the second, as it is ready to use (processed).
+
+
+There are four 'platform' for DNA methylation:
+  . "illumina human methylation 27" (HM27): targets 27,578 CpG sites across the genome, focusing on regions of known importance, such as gene promoters and other regulatory regions.
+  . "illumina human methylation 450" (HM450) (a lot of files available, more than 30k): extends the HM27, analyzing 485,577 CpG sites.
+  . "illumina methylation epic" (EPIC): analyzes 850k CpG sites and  includes also non-coding regions, with more emphasis on enhancer and regulatory regions.
+  . "illumina methylation epic v2" (few files, 195 to be exactly): similar to EPIC, but with additional or optimized coverage.
+
+The second one, creates a folder of 9,03 GB. When preparing, it occurs an error "Error: vector memory exhausted (limit reached?)". 
+The first one, creates a folder of 225,9 MB, but it was not downloaded any folder for "TCGA-LGG"! The platform "illumina human methylation 27" is not available for this project. 
+NOTE: if it is not specified, it will be downloaded all available data for the selected project, data category, etc. regardless of platform, so not a good solution.
+
+To use the second one, we had to use the "client", in the terminal, and download the files by the manifest (from the function getManifest(query)).
+```{r, results = 'hide', message = FALSE, warning = FALSE}
+
+query_methylation_gbm <- GDCquery(
+  project = "TCGA-GBM",
+  data.category = "DNA Methylation",
+  data.type = "Methylation Beta Value", 
+  workflow.type = "SeSAMe Methylation Beta Estimation", # only one available (for this 'data.category')
+  access = "open",
+  platform = "Illumina Human Methylation 450",
+  data.format = "txt", # only one available (for this 'data.category' and 'data.type')
+  experimental.strategy = "Methylation Array" # only one available (for this 'data.category')
+)
+
+if (!dir.exists("DataSets/GDCdata/TCGA-GBM/DNA_Methylation")) {
+  GDCdownload(query = query_methylation_gbm, files.per.chunk = 10)
+}
+
+data.methylation.gbm <- GDCprepare(query_methylation_gbm, summarizedExperiment = TRUE)
+rm(query_methylation_gbm)
+```
+"Genome of reference: hg38" in the output of the query, so I guess this is harmonized.
+
+
+```{r, results = 'hide', message = FALSE, warning = FALSE}
+
+query_methylation_lgg <- GDCquery(
+  project = "TCGA-LGG",
+  data.category = "DNA Methylation",
+  data.type = "Methylation Beta Value", 
+  workflow.type = "SeSAMe Methylation Beta Estimation", # only one available (for this 'data.category')
+  access = "open",
+  platform = "Illumina Human Methylation 450",
+  data.format = "txt", # only one available (for this 'data.category' and 'data.type')
+  experimental.strategy = "Methylation Array" # only one available (for this 'data.category')
+)
+
+if (!dir.exists("DataSets/GDCdata/TCGA-LGG/DNA_Methylation")) {
+  GDCdownload(query = query_methylation_lgg, files.per.chunk = 10)
+}
+
+data.methylation.lgg <- GDCprepare(query_methylation_lgg, summarizedExperiment = TRUE)
+rm(query_methylation_lgg)
+```
+"Genome of reference: hg38" in the output of the query, so I guess this is harmonized.
+
+
+```{r}
+
+# rowData(data.methylation.gbm) and rowData(data.methylation.lgg)) have the exact same information
+info.methy <- as.matrix(rowData(data.methylation.lgg))
+
+assay.methy <- rbind(t(as.matrix(assay(data.methylation.gbm))), t(as.matrix(assay(data.methylation.lgg))))
+
+rm(data.methylation.gbm)
+rm(data.methylation.lgg)
+```
+
+
+
+## Data Quality Check and Cleaning
+
+# Uniquely identifying 
+
+```{r}
+
+ids_duplicated(assay.methy)
+```
+
+```{r}
+
+dim(assay.methy)
+assay.methy <- del_repl_barcodes(assay.methy)
+dim(assay.methy)
+```
+
+
+
+
+```{r}
+
+target_assay <- assay.methy
+```
+
+
+
+# Handling missing values
+
+```{r}
+
+sum(is.na(target_assay)) / prod(dim(target_assay))
+```
+
+```{r}
+missing_by_col <- colSums(is.na(target_assay))/nrow(target_assay)
+data <- as.data.frame(missing_by_col)
+
+p1 <- data %>%
+   filter(missing_by_col>0.5) %>%
+  ggplot( aes(x=missing_by_col)) +
+    geom_density( binwidth=0.05, fill="#69b3a2", color="#e9ecef", alpha=0.9) +
+    labs(title = "Proportion of NAs, by feature (filtered with 0.5)", x = "Proportion of NAs", y = "Number of Features") +
+   theme(
+    axis.text.y = element_text(size = rel(1.5), hjust = 1, color = 'black'),
+    axis.text.x = element_text(size = rel(1.5), vjust = 0.5, color = 'black'),
+    axis.title.y = element_text(size = rel(1.5), hjust = 1, color = 'black'),
+    axis.title.x = element_text(size = rel(1.5), vjust = 1, color = 'black'),
+    legend.text = element_text(size = rel(1.5), color = 'black'),
+    legend.title = element_text(size = rel(1.5), color = 'black'),
+    panel.grid.minor = element_blank(), 
+    panel.border = element_rect(color = "black", fill = NA, size = 0.8),
+    panel.background = element_blank()
+  )
+
+print(p1)
+```
+Remove the features with more or equal than 90% of NAs.
+```{r}
+
+na_proportion <- colMeans(is.na(target_assay))
+target_assay <- target_assay[, na_proportion < 0.9]
+```
+
+
+```{r}
+dim(target_assay)
+sum(is.na(target_assay)) / prod(dim(target_assay))
+```
+
+
+# Outliers
+
+https://rdrr.io/github/xuz1/ENmix/man/qcfilter.html 
+
+```{r}
+target_assay <- qcfilter(target_assay,
+                         rmoutlier = TRUE,
+                         byrow = FALSE,
+                         detPthre = 0.000001,
+                         nbthre = 3,
+                         rmcr = FALSE,
+                         impute = FALSE)
+```
+
+
+```{r}
+
+sum(is.na(target_assay)) / prod(dim(target_assay))
+```
+
+Since the outliers were replaced by missing values,
+```{r}
+
+missing_by_col <- colSums(is.na(target_assay))/nrow(target_assay)
+data <- as.data.frame(missing_by_col)
+
+p1 <- data %>%
+   filter(missing_by_col>0.5) %>%
+  ggplot( aes(x=missing_by_col)) +
+    geom_density(fill="#69b3a2", color="#e9ecef", alpha=0.9) +
+    labs(title = "Proportion of NAs, by feature (filtered with 0.5)", x = "Proportion of NAs", y = "Number of Features")
+
+print(p1)
+```
+We remove again this features (there are very few)
+```{r}
+
+
+na_proportion <- colMeans(is.na(target_assay))
+target_assay <- target_assay[, na_proportion < 0.5]
+
+dim(target_assay)
+sum(is.na(target_assay)) / prod(dim(target_assay))
+```
+
+
+
+
+
+
+## EDA
+
+# Transformation
+To transform to continuous values, the beta values are transformed in M values.
+https://rdrr.io/github/xuz1/ENmix/man/B2M.html
+
+```{r}
+
+target_assay <- B2M(target_assay)
+```
+
+
+
+# Pre-feature selection
+Select the top 2% of the  most variable CpG sites
+```{r}
+library(ggplot2)
+
+var <- apply(target_assay, 2, function(x) var(x, na.rm = TRUE))
+
+df <- data.frame(variance = var)
+
+```
+
+
+
+```{r}
+text_size <- 2
+p <- ggplot(df, aes(y = variance)) +  
+  geom_boxplot(fill = "#FF7F32", color = "black", outlier.color = "#00B3B3") +  
+  geom_hline(aes(yintercept = quantile(variance, 0.98)),  
+             color = "black", lwd = 0.8, linetype = "dashed") +  
+  labs(y = "Feature Variance", x = "") +  
+  theme(
+    axis.ticks.x = element_blank(),
+    axis.text.x = element_blank(), 
+      axis.text.y = element_text(size=rel(text_size), hjust=1, color='black'),
+      axis.title.y= element_text(size=rel(text_size), hjust=1, color='black'),
+      axis.title.x=element_text(size=rel(text_size), vjust=1, color='black'),
+      legend.text = element_text(size = rel(text_size), color = 'black'),
+       legend.title = element_text(size = rel(text_size), color = 'black'),
+     panel.grid.minor = element_blank(), 
+      panel.border = element_rect(color = "black", fill = NA, size = 0.8),
+      panel.background = element_blank(),
+    )
+
+p 
+ggsave(filename = "dna_feature_var.pdf", plot = plot1, width = 9, height = 7, dpi = 300)
+```
+
+
+```{r}
+
+
+sorted_var <- order(var, decreasing = TRUE)
+top_2_methy <- sorted_var[1: floor(length(var) * 0.02)]
+target_assay <- target_assay[,top_2_methy ]
+```
+
+
+```{r}
+dim(target_assay)
+```
+
+```{r}
+write.csv(target_assay, "assay_methylation_for_dge.csv", row.names = TRUE)
+```
+
+
+
+
+# Normalization 
+
+```{r}
+
+target_assay <- scale(target_assay)
+```
+
+```{r}
+assay.methy <- target_assay
+```
+
+
+## Arrange the info matrix
+
+```{r}
+
+info.methy <- info.methy[colnames(assay.methy), , drop = FALSE]
+```
+
+
+
+
+
+## Save Final Matrices
+```{r}
+
+write.csv(assay.methy, "DataSets/processed_assays/assay_methylation.csv", row.names = TRUE)
+write.csv(info.methy, "DataSets/processed_assays/info_methylation.csv", row.names = TRUE)
+```
+
+
+
+
+
+

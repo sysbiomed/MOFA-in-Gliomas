@@ -1,0 +1,209 @@
+---
+title: "Clinical"
+output: html_document
+date: "2024-12-16"
+---
+
+
+## Load libraries
+```{r, results = FALSE, message = FALSE, warning = FALSE}
+
+library("TCGAbiolinks")
+library("SummarizedExperiment")
+```
+
+
+## Download Data
+```{r, results = 'hide', message = FALSE, warning = FALSE}
+
+data.clinical.GBM <- GDCquery_clinic(
+  project = "TCGA-GBM", 
+  type = "Clinical"
+)
+
+data.clinical.LGG <- GDCquery_clinic(
+  project = "TCGA-LGG", 
+  type = "Clinical"
+)
+```
+
+
+
+The clinical data's from the two 'project' do not have the same information.
+```{r}
+
+ncol(data.clinical.GBM)
+ncol(data.clinical.LGG)
+
+length(intersect(colnames(data.clinical.GBM), colnames(data.clinical.LGG)))
+
+# columns that "data.clinical.GBM" have but not "data.clinical.LGG"
+setdiff(colnames(data.clinical.GBM), colnames(data.clinical.LGG))
+```
+
+
+
+
+Merging the two, keeping the columns in common, the columns of "data.clinical.LGG".
+```{r}
+
+common_columns <- intersect(colnames(data.clinical.GBM), colnames(data.clinical.LGG))
+data.clinical <- rbind(data.clinical.GBM[, common_columns], data.clinical.LGG[, common_columns])
+
+clinical <- as.matrix(data.clinical)
+rownames(clinical) <- clinical[,"submitter_id"]
+clinical <- clinical[,-2]
+
+rm(data.clinical.LGG)
+rm(data.clinical.GBM)
+```
+They contain survival data!
+
+
+In clinical data, the samples identifier are indeed "submitter_id"
+Note that in https://docs.gdc.cancer.gov/Data/Data_Model/GDC_Data_Model/, it says that "submitter_id" are unique for the pair "project_type" and "submitter_id" (pair PK).
+```{r}
+
+length(unique(data.clinical[,"submitter_id"])) == length(data.clinical[,"submitter_id"])
+rm(data.clinical)
+```
+It seems we don't have that problem here.
+
+
+```{r}
+
+clinical <- as.data.frame(clinical)
+```
+
+
+## Explore
+
+```{r}
+
+colnames(clinical)
+
+unique(clinical$classification_of_tumor)
+unique(clinical$tumor_grade)
+unique(clinical$primary_diagnosis) # is this the classification? or just rely on the project?
+unique(clinical$tumor_grade)
+```
+
+
+
+Classification of Samples
+```{r}
+labels <- clinical$primary_diagnosis
+
+transformed_labels <- ifelse(labels == "Glioblastoma", "glioblastoma",
+                      ifelse(labels %in% c("Oligodendroglioma, anaplastic", "Oligodendroglioma, NOS"), "oligodendroglioma",
+                      ifelse(labels %in% c("Astrocytoma, NOS", "Astrocytoma, anaplastic"), "astrocytoma",
+                      ifelse(labels %in% c("Mixed glioma"), "mixed glioma",
+                      labels))))
+
+clinical <- cbind(clinical, transformed_labels)
+```
+
+
+```{r}
+
+summary(as.factor(clinical$transformed_labels))
+print("------")
+summary(as.factor(clinical$primary_diagnosis))
+```
+
+
+
+
+- Is the tumor classification correct, I mean, associating with the right project?
+```{r}
+
+clinical$project[clinical$transformed_labels == "glioblastoma"]
+clinical$project[clinical$transformed_labels == "astrocytoma"]
+clinical$project[clinical$transformed_labels == "oligodendroglioma"]
+clinical$project[clinical$transformed_labels == "mixed glioma"]
+```
+ANSWER: Yes, it is!
+
+
+- What it means "Mixed glioma"? From a specific project? 
+
+https://www.cancer.gov/publications/dictionaries/cancer-terms/def/mixed-glioma 
+ANSWER: is a mix of astrocytoma and oligodendroglioma (but LGG cancer).
+
+
+```{r}
+
+important_columns <- c("project", "days_to_last_follow_up", "days_to_death", "age_at_index", "vital_status", "gender", "primary_diagnosis", "transformed_labels")
+clinical <- clinical[,important_columns]
+```
+
+
+Replace Not Reported by NA (in "vital_status" and "gender") 
+```{r}
+
+clinical$gender[clinical$gender == "not reported"] <- NA
+clinical$vital_status[clinical$vital_status == "Not Reported"] <- NA
+```
+
+
+
+
+# Survival Data
+```{r}
+
+createSurvivalAssay <- function(clinical_assay){
+  
+  assay.survival <- matrix(data = NA, nrow = nrow(clinical_assay), ncol = 2,
+                            dimnames = list(rownames(clinical_assay), c("survival", "death")))
+  
+  assay.survival[, "death"] <- ifelse(
+    clinical_assay[, "vital_status"] == "Dead", 1,
+    ifelse(
+      is.na(clinical_assay[, "vital_status"]) | clinical_assay[, "vital_status"] == "Not Reported",
+      NA,
+      0
+    )
+  )
+  
+  assay.survival[,"survival"] <- ifelse(
+    assay.survival[,"death"] == 1, 
+    clinical_assay[,"days_to_death"],
+    ifelse(
+      assay.survival[,"death"] == 0,
+      clinical_assay[,"days_to_last_follow_up"],
+      NA
+    )
+  )
+  
+  return(as.data.frame(assay.survival))
+}
+
+```
+
+```{r}
+
+survival <- createSurvivalAssay(clinical)
+dim(survival)
+```
+
+
+```{r}
+colnames(survival) <- c("Time", "Status")
+```
+
+```{r}
+
+survival.complete <- survival[complete.cases(survival), ]
+dim(survival.complete)
+```
+
+```{r}
+write.csv(survival.complete, "DataSets/processed_assays/survival_complete.csv", row.names = TRUE)
+```
+
+## Save final matrix
+```{r}
+
+write.csv(clinical, "DataSets/processed_assays/clinical.csv", row.names = TRUE)
+```
+
